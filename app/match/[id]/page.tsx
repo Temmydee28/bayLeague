@@ -28,6 +28,46 @@ export default function MatchPage() {
   
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const playSound = (type: 'whistle' | 'goal') => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      if (type === 'whistle') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1000, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.1);
+        osc.frequency.linearRampToValueAtTime(1000, ctx.currentTime + 0.5);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.1);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+        if ('vibrate' in navigator) navigator.vibrate([300]);
+      } else if (type === 'goal') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(400, ctx.currentTime);
+        osc.frequency.linearRampToValueAtTime(600, ctx.currentTime + 0.1);
+        osc.frequency.setValueAtTime(600, ctx.currentTime + 0.3);
+        osc.frequency.linearRampToValueAtTime(800, ctx.currentTime + 0.4);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + 0.1);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 1);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 1);
+        if ('vibrate' in navigator) navigator.vibrate([200, 100, 200, 100, 500]);
+      }
+    } catch (e) {
+      console.log('Audio not supported', e);
+    }
+  };
+
   useEffect(() => {
     fetchMatch();
   }, [id]);
@@ -45,9 +85,23 @@ export default function MatchPage() {
                 const teamName = eventTeamId === homeId ? updatedMatch.homeTeam.name : updatedMatch.awayTeam.name;
                 
                 setToastMessage(`GOAL! ${newEvent.playerName} scores for ${teamName}!`);
+                playSound('goal');
                 setTimeout(() => setToastMessage(null), 5000);
               }
             }
+
+            if (prevMatch && prevMatch.status === 'pending' && updatedMatch.status === 'live') {
+              setToastMessage('Match Started!');
+              playSound('whistle');
+              setTimeout(() => setToastMessage(null), 4000);
+            }
+
+            if (prevMatch && prevMatch.status === 'live' && updatedMatch.status === 'finished') {
+              setToastMessage('Match Ended!');
+              playSound('whistle');
+              setTimeout(() => setToastMessage(null), 4000);
+            }
+
             return {
               ...updatedMatch,
               homeScore: updatedMatch.score?.home ?? 0,
@@ -68,7 +122,11 @@ export default function MatchPage() {
       const resp = await api.get(`/match/${id}`);
       setMatch(resp.data);
       if (resp.data.tournamentId) {
-         joinTournament(resp.data.tournamentId);
+         let tId = resp.data.tournamentId;
+         if (typeof resp.data.tournamentId === 'object') {
+             tId = resp.data.tournamentId._id || resp.data.tournamentId.id;
+         }
+         joinTournament(tId);
       }
       setError(null);
     } catch (err: any) {
@@ -103,7 +161,17 @@ export default function MatchPage() {
 
   const handleStart = async () => {
     try {
-      await api.post('/match/start', { matchId: id });
+      const resp = await api.post('/match/start', { matchId: id });
+      const newMatch = resp.data.match;
+      setMatch((prev: any) => ({
+        ...prev,
+        ...newMatch,
+        homeScore: newMatch.score?.home ?? prev?.homeScore ?? 0,
+        awayScore: newMatch.score?.away ?? prev?.awayScore ?? 0
+      }));
+      setToastMessage('Match Started!');
+      playSound('whistle');
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       alert('Failed to start match');
     }
@@ -112,7 +180,17 @@ export default function MatchPage() {
   const handleEnd = async () => {
     if (!confirm('Are you sure you want to end this match? This cannot be undone.')) return;
     try {
-      await api.post('/match/end', { matchId: id });
+      const resp = await api.post('/match/end', { matchId: id });
+      const newMatch = resp.data.match;
+      setMatch((prev: any) => ({
+        ...prev,
+        ...newMatch,
+        homeScore: newMatch.score?.home ?? prev?.homeScore ?? 0,
+        awayScore: newMatch.score?.away ?? prev?.awayScore ?? 0
+      }));
+      setToastMessage('Match Ended!');
+      playSound('whistle');
+      setTimeout(() => setToastMessage(null), 4000);
     } catch (err) {
       alert('Failed to end match');
     }
@@ -122,14 +200,28 @@ export default function MatchPage() {
     e.preventDefault();
     setGoalLoading(true);
     try {
-      await api.post('/match/add-event', {
+      const resp = await api.post('/match/add-event', {
         matchId: id,
         type: 'goal',
         teamId: goalData.team === 'home' ? match.homeTeam._id : match.awayTeam._id,
         playerName: goalData.player,
-        minute: parseInt(goalData.minute) || timer,
+        minute: parseInt(goalData.minute) || (typeof timer === 'number' ? timer : 45),
         assist: goalData.assist
       });
+      
+      const newMatch = resp.data.match;
+      setMatch((prev: any) => ({
+        ...prev,
+        ...newMatch,
+        homeScore: newMatch.score?.home ?? prev?.homeScore ?? 0,
+        awayScore: newMatch.score?.away ?? prev?.awayScore ?? 0
+      }));
+      
+      const teamName = goalData.team === 'home' ? match.homeTeam.name : match.awayTeam.name;
+      setToastMessage(`GOAL! ${goalData.player} scores for ${teamName}!`);
+      playSound('goal');
+      setTimeout(() => setToastMessage(null), 5000);
+
       setShowGoalModal(false);
       setGoalData({ team: 'home', player: '', minute: '', assist: '' });
     } catch (err) {

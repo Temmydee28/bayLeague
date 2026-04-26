@@ -64,7 +64,7 @@ export default function Dashboard() {
         teams: teams.map(t => ({ name: t || 'Unnamed Team' })),
         settings: { legs: 1 }
       });
-      setTournaments([...tournaments, resp.data]);
+      setTournaments([resp.data.tournament, ...tournaments]);
       setTName('');
       setTeams(Array(teamCount).fill(''));
       setErrorMessage(null);
